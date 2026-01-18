@@ -8,9 +8,7 @@ Usage:
 Requirements:
     pip install huggingface_hub
 
-This downloads the VAE and transformer safetensors files needed for inference.
-The text encoder (~8GB) is optional - only needed if you plan to implement
-the Qwen3 text encoder in the future.
+This downloads the VAE, transformer, and Qwen3 text encoder needed for inference.
 """
 
 import argparse
@@ -26,11 +24,6 @@ def main():
         '--output-dir', '-o',
         default='./flux-klein-model',
         help='Output directory (default: ./flux-klein-model)'
-    )
-    parser.add_argument(
-        '--include-text-encoder',
-        action='store_true',
-        help='Also download the text encoder (~8GB, not required for basic inference)'
     )
     args = parser.parse_args()
 
@@ -50,25 +43,19 @@ def main():
     print(f"Output dir: {output_dir}")
     print()
 
-    # Files to download - only VAE and transformer are needed for inference
+    # Files to download - VAE, transformer, and text encoder
     patterns = [
         "vae/*.safetensors",
         "vae/*.json",
         "transformer/*.safetensors",
         "transformer/*.json",
+        "text_encoder/*",
+        "text_encoder_2/*",
+        "tokenizer/*",
+        "tokenizer_2/*",
     ]
 
-    if args.include_text_encoder:
-        patterns.extend([
-            "text_encoder/*",
-            "text_encoder_2/*",
-            "tokenizer/*",
-            "tokenizer_2/*",
-        ])
-        print("Including text encoder (this will download ~8GB extra)")
-        print()
-
-    print("Downloading files...")
+    print("Downloading files (~16GB total)...")
     print("(This may take a while depending on your connection)")
     print()
 
@@ -87,25 +74,27 @@ def main():
         # Show file sizes
         vae_path = output_dir / "vae" / "diffusion_pytorch_model.safetensors"
         tf_path = output_dir / "transformer" / "diffusion_pytorch_model.safetensors"
+        te_path = output_dir / "text_encoder_2"
 
         total_size = 0
         if vae_path.exists():
             vae_size = vae_path.stat().st_size
             total_size += vae_size
-            print(f"  VAE:         {vae_size / 1024 / 1024:.1f} MB")
+            print(f"  VAE:          {vae_size / 1024 / 1024:.1f} MB")
         if tf_path.exists():
             tf_size = tf_path.stat().st_size
             total_size += tf_size
-            print(f"  Transformer: {tf_size / 1024 / 1024 / 1024:.2f} GB")
+            print(f"  Transformer:  {tf_size / 1024 / 1024 / 1024:.2f} GB")
+        if te_path.exists():
+            te_size = sum(f.stat().st_size for f in te_path.rglob("*") if f.is_file())
+            total_size += te_size
+            print(f"  Text encoder: {te_size / 1024 / 1024 / 1024:.2f} GB")
 
         if total_size > 0:
-            print(f"  Total:       {total_size / 1024 / 1024 / 1024:.2f} GB")
+            print(f"  Total:        {total_size / 1024 / 1024 / 1024:.2f} GB")
         print()
         print("Usage:")
         print(f"  ./flux -d {output_dir} -p \"your prompt\" -o output.png")
-        print()
-        print("Note: Text-to-image requires text embeddings (use -e option)")
-        print("      until the Qwen3 text encoder is implemented.")
         print()
 
     except Exception as e:
