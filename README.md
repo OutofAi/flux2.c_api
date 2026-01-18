@@ -79,10 +79,15 @@ The `-t` (strength) parameter controls how much the image changes:
 -t, --strength N      How much to change the image, 0.0-1.0 (default: 0.75)
 ```
 
+**Output options:**
+```
+-q, --quiet           Silent mode, no output
+-v, --verbose         Show detailed config and timing info
+```
+
 **Other options:**
 ```
 -e, --embeddings PATH Load pre-computed text embeddings (advanced)
--v, --verbose         Show detailed progress
 -h, --help            Show help
 ```
 
