@@ -2,83 +2,126 @@
 # Makefile
 
 CC = gcc
-CFLAGS = -Wall -Wextra -O3 -march=native -ffast-math
+CFLAGS_BASE = -Wall -Wextra -O3 -march=native -ffast-math
 LDFLAGS = -lm
 
 # Platform detection
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
-# macOS configuration
-ifeq ($(UNAME_S),Darwin)
-    CFLAGS += -DACCELERATE_NEW_LAPACK
-    LDFLAGS += -framework Accelerate
-
-    # Apple Silicon: Enable Metal GPU acceleration
-    ifeq ($(UNAME_M),arm64)
-        USE_METAL = 1
-    endif
-endif
-
-# Linux configuration
-ifeq ($(UNAME_S),Linux)
-    ifdef USE_OPENBLAS
-        CFLAGS += -DUSE_OPENBLAS
-        LDFLAGS += -lopenblas
-    endif
-endif
-
-# Metal GPU acceleration (Apple Silicon only)
-ifdef USE_METAL
-    CFLAGS += -DUSE_METAL
-    OBJCFLAGS = $(CFLAGS) -fobjc-arc
-    LDFLAGS += -framework Metal -framework MetalPerformanceShaders -framework Foundation
-    METAL_SRC = flux_metal.m
-    METAL_OBJ = flux_metal.o
-endif
-
-# Debug build
-DEBUG_CFLAGS = -Wall -Wextra -g -O0 -DDEBUG -fsanitize=address
-
 # Source files
 SRCS = flux.c flux_kernels.c flux_tokenizer.c flux_vae.c flux_transformer.c flux_sample.c flux_image.c flux_safetensors.c flux_qwen3.c flux_qwen3_tokenizer.c
 OBJS = $(SRCS:.c=.o)
-
-# Main program
 MAIN = main.c
 TARGET = flux
-
-# Library
 LIB = libflux.a
 
-.PHONY: all clean debug lib install info test
+# Debug build flags
+DEBUG_CFLAGS = -Wall -Wextra -g -O0 -DDEBUG -fsanitize=address
 
-all: $(TARGET)
+.PHONY: all clean debug lib install info test help generic blas mps
 
-# Main target
-$(TARGET): $(OBJS) $(METAL_OBJ) $(MAIN:.c=.o)
+# Default: show available targets
+all: help
+
+help:
+	@echo "FLUX.2 klein 4B - Build Targets"
+	@echo ""
+	@echo "Choose a backend:"
+	@echo "  make generic  - Pure C, no dependencies (slow)"
+	@echo "  make blas     - With BLAS acceleration (~30x faster)"
+ifeq ($(UNAME_S),Darwin)
+ifeq ($(UNAME_M),arm64)
+	@echo "  make mps      - Apple Silicon with Metal GPU (fastest)"
+endif
+endif
+	@echo ""
+	@echo "Other targets:"
+	@echo "  make clean    - Remove build artifacts"
+	@echo "  make test     - Run inference test"
+	@echo "  make info     - Show build configuration"
+	@echo "  make lib      - Build static library"
+	@echo ""
+	@echo "Example: make mps && ./flux -d flux-klein-model -p \"a cat\" -o cat.png"
+
+# =============================================================================
+# Backend: generic (pure C, no BLAS)
+# =============================================================================
+generic: CFLAGS = $(CFLAGS_BASE) -DGENERIC_BUILD
+generic: clean $(TARGET)
+	@echo ""
+	@echo "Built with GENERIC backend (pure C, no BLAS)"
+	@echo "This will be slow but has zero dependencies."
+
+# =============================================================================
+# Backend: blas (Accelerate on macOS, OpenBLAS on Linux)
+# =============================================================================
+ifeq ($(UNAME_S),Darwin)
+blas: CFLAGS = $(CFLAGS_BASE) -DUSE_BLAS -DACCELERATE_NEW_LAPACK
+blas: LDFLAGS += -framework Accelerate
+else
+blas: CFLAGS = $(CFLAGS_BASE) -DUSE_BLAS -DUSE_OPENBLAS
+blas: LDFLAGS += -lopenblas
+endif
+blas: clean $(TARGET)
+	@echo ""
+	@echo "Built with BLAS backend (~30x faster than generic)"
+
+# =============================================================================
+# Backend: mps (Apple Silicon Metal GPU)
+# =============================================================================
+ifeq ($(UNAME_S),Darwin)
+ifeq ($(UNAME_M),arm64)
+MPS_CFLAGS = $(CFLAGS_BASE) -DUSE_BLAS -DUSE_METAL -DACCELERATE_NEW_LAPACK
+MPS_OBJCFLAGS = $(MPS_CFLAGS) -fobjc-arc
+MPS_LDFLAGS = $(LDFLAGS) -framework Accelerate -framework Metal -framework MetalPerformanceShaders -framework Foundation
+
+mps: clean mps-build
+	@echo ""
+	@echo "Built with MPS backend (Metal GPU acceleration)"
+
+mps-build: $(SRCS:.c=.mps.o) flux_metal.o main.mps.o
+	$(CC) $(MPS_CFLAGS) -o $(TARGET) $^ $(MPS_LDFLAGS)
+
+%.mps.o: %.c flux.h flux_kernels.h
+	$(CC) $(MPS_CFLAGS) -c -o $@ $<
+
+flux_metal.o: flux_metal.m flux_metal.h
+	$(CC) $(MPS_OBJCFLAGS) -c -o $@ $<
+
+else
+mps:
+	@echo "Error: MPS backend requires Apple Silicon (arm64)"
+	@exit 1
+endif
+else
+mps:
+	@echo "Error: MPS backend requires macOS"
+	@exit 1
+endif
+
+# =============================================================================
+# Build rules
+# =============================================================================
+$(TARGET): $(OBJS) main.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 lib: $(LIB)
 
-$(LIB): $(OBJS) $(METAL_OBJ)
+$(LIB): $(OBJS)
 	ar rcs $@ $^
 
-# C source compilation
 %.o: %.c flux.h flux_kernels.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Objective-C compilation (Metal)
-ifdef USE_METAL
-flux_metal.o: flux_metal.m flux_metal.h
-	$(CC) $(OBJCFLAGS) -c -o $@ $<
-endif
-
+# Debug build
 debug: CFLAGS = $(DEBUG_CFLAGS)
 debug: LDFLAGS += -fsanitize=address
 debug: clean $(TARGET)
 
-# Test against reference image
+# =============================================================================
+# Test and utilities
+# =============================================================================
 TEST_PROMPT = "A fluffy orange cat sitting on a windowsill"
 test: $(TARGET)
 	@echo "Running inference test..."
@@ -94,7 +137,6 @@ exit(0 if diff.max() < 2 else 1)"
 	@rm -f /tmp/flux_test_output.png
 	@echo "TEST PASSED"
 
-# Install to /usr/local
 install: $(TARGET) $(LIB)
 	install -d /usr/local/bin
 	install -d /usr/local/lib
@@ -105,9 +147,26 @@ install: $(TARGET) $(LIB)
 	install -m 644 flux_kernels.h /usr/local/include/
 
 clean:
-	rm -f $(OBJS) $(METAL_OBJ) $(MAIN:.c=.o) $(TARGET) $(LIB)
+	rm -f $(OBJS) *.mps.o flux_metal.o main.o $(TARGET) $(LIB)
 
+info:
+	@echo "Platform: $(UNAME_S) $(UNAME_M)"
+	@echo "Compiler: $(CC)"
+	@echo ""
+	@echo "Available backends for this platform:"
+	@echo "  generic - Pure C (always available)"
+ifeq ($(UNAME_S),Darwin)
+	@echo "  blas    - Apple Accelerate"
+ifeq ($(UNAME_M),arm64)
+	@echo "  mps     - Metal GPU (recommended)"
+endif
+else
+	@echo "  blas    - OpenBLAS (requires libopenblas-dev)"
+endif
+
+# =============================================================================
 # Dependencies
+# =============================================================================
 flux.o: flux.c flux.h flux_kernels.h flux_safetensors.h flux_qwen3.h
 flux_kernels.o: flux_kernels.c flux_kernels.h
 flux_tokenizer.o: flux_tokenizer.c flux.h
@@ -119,33 +178,3 @@ flux_safetensors.o: flux_safetensors.c flux_safetensors.h
 flux_qwen3.o: flux_qwen3.c flux_qwen3.h flux_safetensors.h
 flux_qwen3_tokenizer.o: flux_qwen3_tokenizer.c flux_qwen3.h
 main.o: main.c flux.h flux_kernels.h
-
-# Show build configuration
-info:
-	@echo "Build configuration:"
-	@echo "  Platform: $(UNAME_S) $(UNAME_M)"
-	@echo "  Compiler: $(CC)"
-	@echo "  CFLAGS:   $(CFLAGS)"
-	@echo "  LDFLAGS:  $(LDFLAGS)"
-ifdef USE_METAL
-	@echo "  Metal:    ENABLED (GPU acceleration)"
-else
-	@echo "  Metal:    disabled"
-endif
-
-help:
-	@echo "FLUX.2 Makefile targets:"
-	@echo "  all       - Build the flux executable (default)"
-	@echo "  lib       - Build static library libflux.a"
-	@echo "  test      - Run inference test against reference image"
-	@echo "  debug     - Build with debug symbols and sanitizers"
-	@echo "  install   - Install to /usr/local"
-	@echo "  clean     - Remove build artifacts"
-	@echo "  info      - Show build configuration"
-	@echo ""
-	@echo "Usage:"
-	@echo "  ./flux -d model/ -p \"prompt\" -o output.png"
-ifdef USE_METAL
-	@echo ""
-	@echo "Note: Metal GPU acceleration is enabled for Apple Silicon"
-endif

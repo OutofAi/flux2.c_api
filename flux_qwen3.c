@@ -16,13 +16,12 @@
 #include <string.h>
 #include <math.h>
 
+/* Use BLAS for matrix operations when enabled via Makefile */
+#ifdef USE_BLAS
 #ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
-#define USE_BLAS 1
 #else
-#ifdef USE_OPENBLAS
 #include <cblas.h>
-#define USE_BLAS 1
 #endif
 #endif
 

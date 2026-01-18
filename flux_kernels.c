@@ -15,12 +15,13 @@
 #include "flux_metal.h"
 #endif
 
-/* Use BLAS for matrix operations when available */
+/* Use BLAS for matrix operations when enabled via Makefile */
+#ifdef USE_BLAS
 #ifdef __APPLE__
-#define USE_ACCELERATE
 #include <Accelerate/Accelerate.h>
-#elif defined(USE_OPENBLAS)
+#else
 #include <cblas.h>
+#endif
 #endif
 
 /* Minimum matrix size to use GPU (smaller matrices are faster on CPU) */
@@ -179,7 +180,7 @@ void flux_matmul(float *C, const float *A, const float *B,
     }
 #endif
 
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                 M, N, K,
                 1.0f, A, K, B, N,
@@ -216,7 +217,7 @@ void flux_matmul_t(float *C, const float *A, const float *B,
     }
 #endif
 
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 M, N, K,
                 1.0f, A, K, B, K,
@@ -282,7 +283,7 @@ void flux_linear(float *y, const float *x, const float *W, const float *b,
     }
 #endif
 
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
     /* Use BLAS sgemm: C = alpha * A @ B^T + beta * C
      * A[M, K] = x[seq_len, in_dim]
      * B[N, K] = W[out_dim, in_dim]
@@ -360,7 +361,7 @@ void flux_conv2d(float *out, const float *in, const float *weight, const float *
     int outH = (H + 2 * padding - kH) / stride + 1;
     int outW = (W + 2 * padding - kW) / stride + 1;
 
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
     /* im2col + BLAS optimization */
     int col_size = in_ch * kH * kW * outH * outW;
     float *col = malloc(col_size * sizeof(float));

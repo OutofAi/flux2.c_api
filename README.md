@@ -5,8 +5,10 @@ Generate images from text prompts using FLUX.2-klein-4B, implemented entirely in
 ## Quick Start
 
 ```bash
-# Build (no dependencies needed)
-make
+# Build (choose your backend)
+make mps       # Apple Silicon (fastest)
+# or: make blas    # Intel Mac / Linux with OpenBLAS
+# or: make generic # Pure C, no dependencies
 
 # Download the model (~16GB)
 pip install huggingface_hub
@@ -100,24 +102,35 @@ $ ./flux -d flux-klein-model -p "a landscape" -o out.png -S 1705612345
 
 ## Building
 
+Choose a backend when building:
+
 ```bash
-make
+make            # Show available backends
+make generic    # Pure C, no dependencies (slow)
+make blas       # BLAS acceleration (~30x faster)
+make mps        # Apple Silicon Metal GPU (fastest, macOS only)
 ```
 
-Build options:
-```bash
-make clean      # Clean build artifacts
-make info       # Show build configuration
-make test       # Run reference image test
-```
+**Recommended:**
+- macOS Apple Silicon: `make mps`
+- macOS Intel: `make blas`
+- Linux with OpenBLAS: `make blas`
+- Linux without OpenBLAS: `make generic`
 
-On macOS, Metal GPU acceleration is automatically enabled. On Linux, ensure OpenBLAS is installed:
+For `make blas` on Linux, install OpenBLAS first:
 ```bash
 # Ubuntu/Debian
 sudo apt install libopenblas-dev
 
 # Fedora
 sudo dnf install openblas-devel
+```
+
+Other targets:
+```bash
+make clean      # Clean build artifacts
+make info       # Show available backends for this platform
+make test       # Run reference image test
 ```
 
 ## Model Download

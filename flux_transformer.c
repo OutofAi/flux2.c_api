@@ -21,6 +21,15 @@
 #include <string.h>
 #include <math.h>
 
+/* Use BLAS for matrix operations when enabled via Makefile */
+#ifdef USE_BLAS
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#else
+#include <cblas.h>
+#endif
+#endif
+
 /* ========================================================================
  * Transformer Data Structures
  * ======================================================================== */
@@ -470,7 +479,7 @@ static void mha_forward(float *out, const float *q, const float *k, const float 
 
         /* scores = Q @ K^T using BLAS */
         /* Q[seq, head_dim] @ K[seq, head_dim]^T = scores[seq, seq] */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                     seq, seq, head_dim,
                     scale, qh, head_dim, kh, head_dim,
@@ -494,7 +503,7 @@ static void mha_forward(float *out, const float *q, const float *k, const float 
 
         /* out = scores @ V using BLAS */
         /* scores[seq, seq] @ V[seq, head_dim] = out[seq, head_dim] */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     seq, head_dim, seq,
                     1.0f, scores, seq, vh, head_dim,
@@ -576,7 +585,7 @@ static void joint_attention(float *img_out, float *txt_out,
         float *oh_txt = txt_out_t + h * txt_seq * head_dim;
 
         /* Image Q @ K^T */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                     img_seq, total_seq, head_dim,
                     scale, qh_img, head_dim, kh, head_dim,
@@ -609,7 +618,7 @@ static void joint_attention(float *img_out, float *txt_out,
         flux_softmax(img_scores, img_seq, total_seq);
 
         /* Image scores @ V */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     img_seq, head_dim, total_seq,
                     1.0f, img_scores, total_seq, vh, head_dim,
@@ -632,7 +641,7 @@ static void joint_attention(float *img_out, float *txt_out,
 #endif
 
         /* Text Q @ K^T */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                     txt_seq, total_seq, head_dim,
                     scale, qh_txt, head_dim, kh, head_dim,
@@ -654,7 +663,7 @@ static void joint_attention(float *img_out, float *txt_out,
         flux_softmax(txt_scores, txt_seq, total_seq);
 
         /* Text scores @ V */
-#if defined(USE_ACCELERATE) || defined(USE_OPENBLAS)
+#ifdef USE_BLAS
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     txt_seq, head_dim, total_seq,
                     1.0f, txt_scores, total_seq, vh, head_dim,
