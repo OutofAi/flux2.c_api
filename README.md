@@ -187,119 +187,186 @@ Dimensions should be multiples of 16 (the VAE downsampling factor).
 
 ## C Library API
 
-The implementation provides a clean C API for integration into other projects:
+The library can be integrated into your own C/C++ projects. Link against `libflux.a` and include `flux.h`.
 
-### Basic Usage
+### Text-to-Image Generation
+
+Here's a complete program that generates an image from a text prompt:
 
 ```c
 #include "flux.h"
+#include <stdio.h>
 
-int main() {
-    // Load model
+int main(void) {
+    /* Load the model. This loads VAE, transformer, and text encoder. */
     flux_ctx *ctx = flux_load_dir("flux-klein-model");
-    if (!ctx) return 1;
+    if (!ctx) {
+        fprintf(stderr, "Failed to load model: %s\n", flux_get_error());
+        return 1;
+    }
 
-    // Generate image
+    /* Configure generation parameters. Start with defaults and customize. */
     flux_params params = FLUX_PARAMS_DEFAULT;
     params.width = 512;
     params.height = 512;
+    params.seed = 42;  /* Use -1 for random seed */
 
-    flux_image *img = flux_generate(ctx, "a cat sitting on a rainbow", &params);
+    /* Generate the image. This handles text encoding, diffusion, and VAE decode. */
+    flux_image *img = flux_generate(ctx, "A fluffy orange cat in a sunbeam", &params);
+    if (!img) {
+        fprintf(stderr, "Generation failed: %s\n", flux_get_error());
+        flux_free(ctx);
+        return 1;
+    }
 
-    // Save and cleanup
-    flux_image_save(img, "output.png");
+    /* Save to file. Format is determined by extension (.png or .ppm). */
+    flux_image_save(img, "cat.png");
+    printf("Saved cat.png (%dx%d)\n", img->width, img->height);
+
+    /* Clean up */
     flux_image_free(img);
     flux_free(ctx);
-
     return 0;
 }
 ```
 
-### Image-to-Image
-
-```c
-flux_image *input = flux_image_load("photo.png");
-
-flux_params params = FLUX_PARAMS_DEFAULT;
-params.strength = 0.7;
-
-flux_image *output = flux_img2img(ctx, "oil painting style", input, &params);
-
-flux_image_free(input);
-flux_image_save(output, "painting.png");
-flux_image_free(output);
+Compile with:
+```bash
+gcc -o myapp myapp.c -L. -lflux -lm -framework Accelerate  # macOS
+gcc -o myapp myapp.c -L. -lflux -lm -lopenblas              # Linux
 ```
 
-### Memory Management
+### Image-to-Image Transformation
+
+Transform an existing image guided by a text prompt. The `strength` parameter controls how much the image changes:
 
 ```c
-// Generate first image (encoder loads, then auto-releases)
-flux_image *img1 = flux_generate(ctx, "prompt 1", &params);
+#include "flux.h"
+#include <stdio.h>
 
-// Generate second image (encoder reloads automatically)
-flux_image *img2 = flux_generate(ctx, "prompt 2", &params);
+int main(void) {
+    flux_ctx *ctx = flux_load_dir("flux-klein-model");
+    if (!ctx) return 1;
 
-// For batch generation with same prompt, encode once:
-float *emb = flux_encode_text(ctx, "shared prompt", &seq_len);
-flux_release_text_encoder(ctx);  // Free ~8GB
+    /* Load the input image */
+    flux_image *photo = flux_image_load("photo.png");
+    if (!photo) {
+        fprintf(stderr, "Failed to load image\n");
+        flux_free(ctx);
+        return 1;
+    }
 
-// Generate multiple images with same embeddings
-for (int i = 0; i < 10; i++) {
-    flux_set_seed(i);
-    flux_image *img = flux_generate_with_embeddings(ctx, emb, seq_len, &params);
-    // ... save image
+    /* Set up parameters. Output size defaults to input size. */
+    flux_params params = FLUX_PARAMS_DEFAULT;
+    params.strength = 0.7;  /* 0.0 = no change, 1.0 = full regeneration */
+    params.seed = 123;
+
+    /* Transform the image */
+    flux_image *painting = flux_img2img(ctx, "oil painting, impressionist style",
+                                         photo, &params);
+    flux_image_free(photo);  /* Done with input */
+
+    if (!painting) {
+        fprintf(stderr, "Transformation failed: %s\n", flux_get_error());
+        flux_free(ctx);
+        return 1;
+    }
+
+    flux_image_save(painting, "painting.png");
+    printf("Saved painting.png\n");
+
+    flux_image_free(painting);
+    flux_free(ctx);
+    return 0;
+}
+```
+
+**Strength values:**
+- `0.3` - Subtle style transfer, preserves most details
+- `0.5` - Moderate transformation
+- `0.7` - Strong transformation, good for style transfer
+- `0.9` - Almost complete regeneration, keeps only composition
+
+### Generating Multiple Images
+
+When generating multiple images with different seeds but the same prompt, you can avoid reloading the text encoder:
+
+```c
+flux_ctx *ctx = flux_load_dir("flux-klein-model");
+flux_params params = FLUX_PARAMS_DEFAULT;
+params.width = 256;
+params.height = 256;
+
+/* Generate 5 variations with different seeds */
+for (int i = 0; i < 5; i++) {
+    flux_set_seed(1000 + i);
+
+    flux_image *img = flux_generate(ctx, "A mountain landscape at sunset", &params);
+
+    char filename[64];
+    snprintf(filename, sizeof(filename), "landscape_%d.png", i);
+    flux_image_save(img, filename);
     flux_image_free(img);
 }
-free(emb);
+
+flux_free(ctx);
+```
+
+Note: The text encoder (~8GB) is automatically released after the first generation to save memory. It reloads automatically if you use a different prompt.
+
+### Error Handling
+
+All functions that can fail return NULL on error. Use `flux_get_error()` to get a description:
+
+```c
+flux_ctx *ctx = flux_load_dir("nonexistent-model");
+if (!ctx) {
+    fprintf(stderr, "Error: %s\n", flux_get_error());
+    /* Prints something like: "Failed to load VAE - cannot generate images" */
+    return 1;
+}
 ```
 
 ### API Reference
 
 **Core functions:**
 ```c
-flux_ctx *flux_load_dir(const char *model_dir);
-void flux_free(flux_ctx *ctx);
-void flux_release_text_encoder(flux_ctx *ctx);
+flux_ctx *flux_load_dir(const char *model_dir);   /* Load model, returns NULL on error */
+void flux_free(flux_ctx *ctx);                     /* Free all resources */
 
 flux_image *flux_generate(flux_ctx *ctx, const char *prompt, const flux_params *params);
-flux_image *flux_img2img(flux_ctx *ctx, const char *prompt, const flux_image *input, const flux_params *params);
+flux_image *flux_img2img(flux_ctx *ctx, const char *prompt, const flux_image *input,
+                          const flux_params *params);
 ```
 
-**Image I/O:**
+**Image handling:**
 ```c
-flux_image *flux_image_load(const char *path);      // Load PNG or PPM
-int flux_image_save(const flux_image *img, const char *path);  // Save PNG or PPM
-flux_image *flux_image_create(int width, int height, int channels);
-flux_image *flux_image_resize(const flux_image *img, int new_width, int new_height);
+flux_image *flux_image_load(const char *path);     /* Load PNG or PPM */
+int flux_image_save(const flux_image *img, const char *path);  /* 0=success, -1=error */
+flux_image *flux_image_resize(const flux_image *img, int new_w, int new_h);
 void flux_image_free(flux_image *img);
 ```
 
 **Utilities:**
 ```c
-void flux_set_seed(int64_t seed);
-const char *flux_model_info(flux_ctx *ctx);
-const char *flux_get_error(void);
+void flux_set_seed(int64_t seed);                  /* Set RNG seed for reproducibility */
+const char *flux_get_error(void);                  /* Get last error message */
+void flux_release_text_encoder(flux_ctx *ctx);     /* Manually free ~8GB (optional) */
 ```
 
-**Low-level functions:**
-```c
-float *flux_encode_text(flux_ctx *ctx, const char *prompt, int *out_seq_len);
-float *flux_encode_image(flux_ctx *ctx, const flux_image *img, int *out_h, int *out_w);
-flux_image *flux_decode_latent(flux_ctx *ctx, const float *latent, int latent_h, int latent_w);
-```
-
-### Parameters Structure
+### Parameters
 
 ```c
 typedef struct {
-    int width;              // Output width (default: 1024)
-    int height;             // Output height (default: 1024)
-    int num_steps;          // Inference steps (default: 4)
-    float guidance_scale;   // CFG scale (default: 1.0)
-    int64_t seed;           // Random seed (-1 for random)
-    float strength;         // For img2img: 0.0-1.0 (default: 0.75)
+    int width;              /* Output width in pixels (default: 1024) */
+    int height;             /* Output height in pixels (default: 1024) */
+    int num_steps;          /* Denoising steps, use 4 for klein (default: 4) */
+    float guidance_scale;   /* CFG scale, use 1.0 for klein (default: 1.0) */
+    int64_t seed;           /* Random seed, -1 for random (default: -1) */
+    float strength;         /* img2img only: 0.0-1.0 (default: 0.75) */
 } flux_params;
 
+/* Initialize with sensible defaults */
 #define FLUX_PARAMS_DEFAULT { 1024, 1024, 4, 1.0f, -1, 0.75f }
 ```
 
