@@ -437,24 +437,18 @@ kernel void apply_rope_unified(
         sin_row = img_sin + img_idx * head_dim;
     }
 
-    // RoPE rotation for each axis (4 axes of 32 dims each = 128)
-    int half_axis = axis_dim / 2;
+    // RoPE rotation: apply to consecutive pairs (d, d+1) matching CPU implementation
+    // cos[d] == cos[d+1] due to repeat_interleave in frequency generation
+    for (int d = 0; d < head_dim; d += 2) {
+        float c = cos_row[d];
+        float s = sin_row[d];
 
-    for (int axis = 0; axis < 4; axis++) {
-        int axis_offset = axis * axis_dim;
-        for (int d = 0; d < half_axis; d++) {
-            int i0 = axis_offset + d;
-            int i1 = axis_offset + half_axis + d;
+        float x0 = vec[d];
+        float x1 = vec[d + 1];
 
-            float c = cos_row[i0];
-            float s = sin_row[i0];
-
-            float x0 = vec[i0];
-            float x1 = vec[i1];
-
-            vec[i0] = x0 * c - x1 * s;
-            vec[i1] = x0 * s + x1 * c;
-        }
+        // Complex rotation: (x0 + i*x1) * (cos + i*sin)
+        vec[d] = x0 * c - x1 * s;
+        vec[d + 1] = x1 * c + x0 * s;
     }
 }
 
