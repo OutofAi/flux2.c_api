@@ -15,6 +15,10 @@
 #include <time.h>
 #include <sys/stat.h>
 
+#ifdef USE_METAL
+#include "flux_metal.h"
+#endif
+
 /* ========================================================================
  * Forward Declarations for Internal Types
  * ======================================================================== */
@@ -147,15 +151,35 @@ flux_ctx *flux_load_dir(const char *model_dir) {
         return NULL;
     }
 
-    /* Verify transformer file exists (will be loaded on-demand) */
+#ifdef USE_METAL
+    /* For Metal builds, load transformer and text encoder at startup.
+     * This avoids GPU cache corruption issues with lazy loading. */
+    snprintf(path, sizeof(path), "%s/transformer/diffusion_pytorch_model.safetensors", model_dir);
+    if (file_exists(path)) {
+        safetensors_file_t *sf = safetensors_open(path);
+        if (sf) {
+            ctx->transformer = flux_transformer_load_safetensors(sf);
+            safetensors_close(sf);
+        }
+    }
+    if (!ctx->transformer) {
+        set_error("Failed to load transformer - cannot generate images");
+        flux_free(ctx);
+        return NULL;
+    }
+
+    /* Load text encoder at startup for Metal builds */
+    ctx->qwen3_encoder = qwen3_encoder_load(model_dir, 0);  /* use_mmap=0 for non-mmap */
+#else
+    /* For non-Metal builds, load lazily to support 16GB RAM systems */
     snprintf(path, sizeof(path), "%s/transformer/diffusion_pytorch_model.safetensors", model_dir);
     if (!file_exists(path)) {
         set_error("Transformer model file not found");
         flux_free(ctx);
         return NULL;
     }
-
     /* Text encoder will also be loaded on-demand */
+#endif
 
     /* Initialize RNG */
     flux_rng_seed((uint64_t)time(NULL));
