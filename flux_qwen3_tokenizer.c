@@ -10,6 +10,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <pthread.h>
 
 /* ========================================================================
  * Configuration
@@ -26,6 +27,38 @@
 #define QWEN3_IM_END_ID 151645   /* <|im_end|> */
 #define QWEN3_THINK_START_ID 151667 /* <think> */
 #define QWEN3_THINK_END_ID 151668   /* </think> */
+
+// ------------------------------------------------------------------------
+// Global tokenizer cache (keeps tokenizer loaded across generations)
+// ------------------------------------------------------------------------
+static qwen3_tokenizer_t *g_tok = NULL;
+static char g_tok_path[1024] = {0};
+static pthread_mutex_t g_tok_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Internal destructor (always frees) */
+static void qwen3_tokenizer_free_internal(qwen3_tokenizer_t *tok) {
+    if (!tok) return;
+
+    if (tok->vocab) {
+        for (int i = 0; i < tok->vocab_size; i++) free(tok->vocab[i]);
+        free(tok->vocab);
+    }
+    if (tok->vocab_hash) {
+        for (int i = 0; i < tok->hash_size; i++) free(tok->vocab_hash[i].token);
+        free(tok->vocab_hash);
+    }
+    if (tok->merges) {
+        for (int i = 0; i < tok->num_merges; i++) {
+            free(tok->merges[i].left);
+            free(tok->merges[i].right);
+        }
+        free(tok->merges);
+    }
+
+    free(tok->merge_ranks);
+    free(tok);
+}
+
 
 /* ========================================================================
  * Data Structures
@@ -313,7 +346,7 @@ static const char *skip_json_value(const char *p) {
  * Tokenizer Loading
  * ======================================================================== */
 
-qwen3_tokenizer_t *qwen3_tokenizer_load(const char *tokenizer_json_path) {
+static qwen3_tokenizer_t *qwen3_tokenizer_load_internal(const char *tokenizer_json_path) {
     /* Read file */
     FILE *f = fopen(tokenizer_json_path, "rb");
     if (!f) {
@@ -604,31 +637,53 @@ error:
 void qwen3_tokenizer_free(qwen3_tokenizer_t *tok) {
     if (!tok) return;
 
-    if (tok->vocab) {
-        for (int i = 0; i < tok->vocab_size; i++) {
-            free(tok->vocab[i]);
-        }
-        free(tok->vocab);
+    pthread_mutex_lock(&g_tok_mu);
+    if (tok == g_tok) {
+        // Keep the cached tokenizer alive for the process lifetime
+        pthread_mutex_unlock(&g_tok_mu);
+        return;
     }
+    pthread_mutex_unlock(&g_tok_mu);
 
-    if (tok->vocab_hash) {
-        for (int i = 0; i < tok->hash_size; i++) {
-            free(tok->vocab_hash[i].token);
-        }
-        free(tok->vocab_hash);
-    }
-
-    if (tok->merges) {
-        for (int i = 0; i < tok->num_merges; i++) {
-            free(tok->merges[i].left);
-            free(tok->merges[i].right);
-        }
-        free(tok->merges);
-    }
-
-    free(tok->merge_ranks);
-    free(tok);
+    qwen3_tokenizer_free_internal(tok);
 }
+
+qwen3_tokenizer_t *qwen3_tokenizer_load(const char *tokenizer_json_path) {
+    if (!tokenizer_json_path) return NULL;
+
+    pthread_mutex_lock(&g_tok_mu);
+
+    // If already loaded for this path, reuse it
+    if (g_tok && g_tok_path[0] && strcmp(g_tok_path, tokenizer_json_path) == 0) {
+        pthread_mutex_unlock(&g_tok_mu);
+        return g_tok;
+    }
+
+    pthread_mutex_unlock(&g_tok_mu);
+
+    // Load outside the lock (slow)
+    qwen3_tokenizer_t *tok = qwen3_tokenizer_load_internal(tokenizer_json_path);
+    if (!tok) return NULL;
+
+    pthread_mutex_lock(&g_tok_mu);
+
+    // If someone else loaded it while we were loading, keep the existing one
+    if (g_tok) {
+        // If the cached one is for a different path, you can either:
+        // (A) keep first one (simple), or (B) replace it.
+        // Here: replace cache to match current path.
+        qwen3_tokenizer_free_internal(g_tok);
+        g_tok = NULL;
+    }
+
+    g_tok = tok;
+    strncpy(g_tok_path, tokenizer_json_path, sizeof(g_tok_path) - 1);
+    g_tok_path[sizeof(g_tok_path) - 1] = '\0';
+
+    pthread_mutex_unlock(&g_tok_mu);
+    return g_tok;
+}
+
 
 /* ========================================================================
  * Merge Rank Lookup
