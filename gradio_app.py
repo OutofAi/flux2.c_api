@@ -1,8 +1,12 @@
 import os, time, ctypes
 import gradio as gr
 
-LIB = os.path.abspath("libfluxserver.so")
-lib = ctypes.CDLL(LIB)
+try:
+    LIB = os.path.abspath("libfluxserver.so")
+    lib = ctypes.CDLL(LIB)
+except:
+    LIB = os.path.abspath("libfluxserver.dylib")
+    lib = ctypes.CDLL(LIB)  
 
 class FluxParams(ctypes.Structure):
     _fields_ = [
