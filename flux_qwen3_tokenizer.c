@@ -31,6 +31,10 @@
 // ------------------------------------------------------------------------
 // Global tokenizer cache (keeps tokenizer loaded across generations)
 // ------------------------------------------------------------------------
+/* forward declare so we can use pointers before the full struct definition */
+typedef struct qwen3_tokenizer qwen3_tokenizer_t;
+
+// Global tokenizer cache...
 static qwen3_tokenizer_t *g_tok = NULL;
 static char g_tok_path[1024] = {0};
 static pthread_mutex_t g_tok_mu = PTHREAD_MUTEX_INITIALIZER;
