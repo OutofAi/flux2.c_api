@@ -39,6 +39,16 @@ make generic-so   # Linux/macOS, no dependencies (slow)
 make blas-so      # Linux with OpenBLAS / macOS with Accelerate (recommended on CPU)
 make mps-so       # Apple Silicon Metal (macOS only)
 ```
+## Gradio app
+
+After doing the Shared library and downloading the model you can run the gradio app
+```bash
+make blas-so      # Linux with OpenBLAS / macOS with Accelerate (recommended on CPU)
+# or: make generic-so   # Linux/macOS, no dependencies (slow)
+# or: make mps-so       # Apple Silicon Metal (macOS only)
+python download_model.py
+python gradio_app.py
+```
 
 ## Example Output
 
