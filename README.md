@@ -38,6 +38,7 @@ Build the shared library with the same backend choices:
 make generic-so   # Linux/macOS, no dependencies (slow)
 make blas-so      # Linux with OpenBLAS / macOS with Accelerate (recommended on CPU)
 make mps-so       # Apple Silicon Metal (macOS only)
+```
 
 ## Example Output
 
