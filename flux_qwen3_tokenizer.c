@@ -39,30 +39,6 @@ static qwen3_tokenizer_t *g_tok = NULL;
 static char g_tok_path[1024] = {0};
 static pthread_mutex_t g_tok_mu = PTHREAD_MUTEX_INITIALIZER;
 
-/* Internal destructor (always frees) */
-static void qwen3_tokenizer_free_internal(qwen3_tokenizer_t *tok) {
-    if (!tok) return;
-
-    if (tok->vocab) {
-        for (int i = 0; i < tok->vocab_size; i++) free(tok->vocab[i]);
-        free(tok->vocab);
-    }
-    if (tok->vocab_hash) {
-        for (int i = 0; i < tok->hash_size; i++) free(tok->vocab_hash[i].token);
-        free(tok->vocab_hash);
-    }
-    if (tok->merges) {
-        for (int i = 0; i < tok->num_merges; i++) {
-            free(tok->merges[i].left);
-            free(tok->merges[i].right);
-        }
-        free(tok->merges);
-    }
-
-    free(tok->merge_ranks);
-    free(tok);
-}
-
 
 /* ========================================================================
  * Data Structures
@@ -95,6 +71,32 @@ typedef struct qwen3_tokenizer {
     /* Merge rank lookup: "left right" -> rank */
     int *merge_ranks;  /* Hash table: hash("left right") -> rank, or -1 */
 } qwen3_tokenizer_t;
+
+
+/* Internal destructor (always frees) */
+static void qwen3_tokenizer_free_internal(qwen3_tokenizer_t *tok) {
+    if (!tok) return;
+
+    if (tok->vocab) {
+        for (int i = 0; i < tok->vocab_size; i++) free(tok->vocab[i]);
+        free(tok->vocab);
+    }
+    if (tok->vocab_hash) {
+        for (int i = 0; i < tok->hash_size; i++) free(tok->vocab_hash[i].token);
+        free(tok->vocab_hash);
+    }
+    if (tok->merges) {
+        for (int i = 0; i < tok->num_merges; i++) {
+            free(tok->merges[i].left);
+            free(tok->merges[i].right);
+        }
+        free(tok->merges);
+    }
+
+    free(tok->merge_ranks);
+    free(tok);
+}
+
 
 /* ========================================================================
  * Byte-Level BPE Encoding Table
