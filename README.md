@@ -28,6 +28,17 @@ python download_model.py
 
 That's it. No Python runtime, no PyTorch, no CUDA toolkit required at inference time.
 
+## Shared Library (for Python / Gradio)
+
+In addition to the CLI (`./flux`), you can build a shared library that keeps the model loaded and can be called from long-running processes (e.g. Gradio).
+
+Build the shared library with the same backend choices:
+
+```bash
+make generic-so   # Linux/macOS, no dependencies (slow)
+make blas-so      # Linux with OpenBLAS / macOS with Accelerate (recommended on CPU)
+make mps-so       # Apple Silicon Metal (macOS only)
+
 ## Example Output
 
 ![Woman with sunglasses](images/woman_with_sunglasses.png)
